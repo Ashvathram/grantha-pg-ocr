@@ -96,4 +96,3 @@ python client.py list
 
 ### About the Developer
 Ashvathram B — Final-year B.Tech CSE student at SASTRA University.
-Inspired by the TATTVA project (Grantha manuscript OCR under JSPS/ICSSR funding with the University of Tokyo).
