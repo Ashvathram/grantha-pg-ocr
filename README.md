@@ -12,7 +12,7 @@
 
 ---
 
-## 🧒 Explain Like I'm 5
+
 
 Imagine you found a **really old book** written in a secret script that nobody can read anymore. It's on crumbly old leaves, not even paper.
 
@@ -39,7 +39,7 @@ SELECT * FROM search_and_translate('karma');
 
 ---
 
-## 🏗️ How It Actually Works (The Grown-Up Version)
+## 🏗️ How It Actually Works 
 
 ```
                         ┌──────────────────────────────────┐
