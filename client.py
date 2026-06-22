@@ -27,6 +27,15 @@ from pathlib import Path
 
 from local_demo_engine import AntigravityPGEngine, C
 
+# ─── Windows ANSI Support ─────────────────────────────────────────────────────
+# Enable ANSI escape codes on Windows 10+ (cmd.exe / PowerShell)
+if sys.platform == "win32":
+    os.system("")  # triggers VT100 mode via Windows API side-effect
+    # Ensure UTF-8 output for Unicode box-drawing characters and IAST diacritics
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 # ─── Display Helpers ──────────────────────────────────────────────────────────
 
@@ -200,7 +209,8 @@ def cmd_search(engine, args):
     """Full-text search via PL/Python stored procedure."""
     _simulate_connection()
     _header(f"SEARCH: '{args.query}'")
-    print(f"  {C.DIM}SELECT * FROM search_manuscripts('{args.query}');{C.RESET}\n")
+    print(f"  {C.DIM}SELECT * FROM search_manuscripts(?);{C.RESET}")
+    print(f"  {C.DIM}  -- ? = '{args.query[:60]}'{C.RESET}\n")
 
     _simulate_pipeline_step("PL/Python plpy.execute() — ILIKE scan", 0.2)
     results = engine.search_manuscripts(args.query)
@@ -220,7 +230,8 @@ def cmd_fuzzy(engine, args):
     """Fuzzy search via pg_trgm trigram similarity."""
     _simulate_connection()
     _header(f"FUZZY SEARCH: '{args.query}' (threshold={args.threshold})")
-    print(f"  {C.DIM}SELECT * FROM fuzzy_search('{args.query}', {args.threshold});{C.RESET}\n")
+    print(f"  {C.DIM}SELECT * FROM fuzzy_search(?, ?);{C.RESET}")
+    print(f"  {C.DIM}  -- ? = '{args.query[:60]}', ? = {args.threshold}{C.RESET}\n")
 
     _simulate_pipeline_step("pg_trgm trigram similarity scan", 0.2)
     results = engine.fuzzy_search(args.query, threshold=args.threshold)
@@ -324,6 +335,107 @@ def cmd_reset(engine, args):
     print()
 
 
+def cmd_demo(engine, args):
+    """Run the full end-to-end demo: ingest → search → fuzzy → similar → translate → stats."""
+    _simulate_connection()
+    _header("FULL DEMO — Grantha PG-OCR Pipeline")
+    print(f"  {C.DIM}Running all pipeline stages with sample manuscripts...{C.RESET}\n")
+
+    # Step 1: Ingest samples
+    samples_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+    if not os.path.isdir(samples_dir):
+        _error(f"Sample directory not found: {samples_dir}")
+        _warn("Please ensure a 'samples/' directory with manuscript images exists.")
+        return
+
+    image_files = []
+    for ext in ("*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff", "*.bmp"):
+        image_files.extend(glob.glob(os.path.join(samples_dir, ext)))
+
+    if not image_files:
+        _error("No sample images found in samples/")
+        return
+
+    print(f"  {C.BOLD}Step 1/6:{C.RESET} Ingesting {len(image_files)} sample manuscripts\n")
+    for img_path in sorted(image_files):
+        print(f"  {C.DIM}  → {os.path.basename(img_path)}{C.RESET}", end="", flush=True)
+        result = engine.ingest_manuscript(img_path)
+        if result["status"] == "duplicate":
+            print(f"  {C.YELLOW}(already ingested){C.RESET}")
+        else:
+            print(f"  {C.GREEN}✓ #{result['id']}{C.RESET}")
+    print()
+
+    # Step 2: Full-text search
+    _header("Step 2/6 — Full-Text Search")
+    print(f"  {C.DIM}SELECT * FROM search_manuscripts(?);{C.RESET}")
+    print(f"  {C.DIM}  -- ? = 'gamaya'{C.RESET}\n")
+    _simulate_pipeline_step("PL/Python plpy.execute() — ILIKE scan", 0.2)
+    results = engine.search_manuscripts("gamaya")
+    _success(f"{len(results)} manuscript(s) matched 'gamaya'")
+    for m in results[:2]:
+        _info("  Match", f"#{m['id']} — {m['filename']}")
+    print()
+
+    # Step 3: Fuzzy search
+    _header("Step 3/6 — Fuzzy Search (pg_trgm)")
+    print(f"  {C.DIM}SELECT * FROM fuzzy_search(?, ?);{C.RESET}")
+    print(f"  {C.DIM}  -- ? = 'yoga', ? = 0.01{C.RESET}\n")
+    _simulate_pipeline_step("pg_trgm trigram similarity scan", 0.2)
+    fuzzy_results = engine.fuzzy_search("yoga", threshold=0.01)
+    _success(f"{len(fuzzy_results)} manuscript(s) above similarity threshold")
+    for m in fuzzy_results[:2]:
+        score = m.get("similarity_score", 0)
+        bar_len = max(0, int(score * 20))
+        bar = f"{'█' * bar_len}{'░' * (20 - bar_len)}"
+        _info("  Match", f"#{m['id']} — similarity: {score:.4f} {C.GREEN}{bar}{C.RESET}")
+    print()
+
+    # Step 4: Similarity search (pgvector)
+    _header("Step 4/6 — Vector Similarity (pgvector)")
+    print(f"  {C.DIM}SELECT filename, embedding <=> query_vec AS distance{C.RESET}")
+    print(f"  {C.DIM}FROM manuscripts ORDER BY distance LIMIT 3;{C.RESET}\n")
+    _simulate_pipeline_step("Encode query → 768-d embedding", 0.15)
+    _simulate_pipeline_step("pgvector cosine scan (top 3)", 0.2)
+    sim_results = engine.similarity_search("righteousness", top_k=3)
+    _success(f"Top {len(sim_results)} results by cosine similarity")
+    for rank, m in enumerate(sim_results, 1):
+        dist = m.get("cosine_distance", 0)
+        _info(f"  Rank #{rank}", f"#{m['id']} — {m['filename']} (distance: {dist:.6f})")
+    print()
+
+    # Step 5: Translate first manuscript
+    _header("Step 5/6 — Gemini Transliteration")
+    first_id = 1
+    m = engine.get_manuscript(first_id)
+    if m:
+        print(f"  {C.DIM}SELECT gemini_translation FROM manuscripts WHERE id = {first_id};{C.RESET}\n")
+        _simulate_pipeline_step("Gemini 2.0 Flash inference", 0.3)
+        _info("Filename", m["filename"])
+        print(f"\n  {C.CYAN}Raw OCR:{C.RESET}")
+        _print_ocr_block(m.get("raw_ocr", ""))
+        print(f"\n  {C.CYAN}Gemini Transliteration:{C.RESET}")
+        translation = m.get("gemini_translation", "")
+        print(f"    {C.WHITE}{C.BOLD}{translation[:200]}{C.RESET}\n")
+    else:
+        _warn("No manuscript with id=1 found for translation demo.")
+    print()
+
+    # Step 6: Stats
+    _header("Step 6/6 — Database Statistics")
+    stats = engine.get_stats()
+    _info("Total Manuscripts", stats["total_manuscripts"])
+    _info("Total Image Data", f"{stats['total_image_bytes'] / 1024:.1f} KB")
+    _info("DB File Size", f"{stats['db_file_size'] / 1024:.1f} KB")
+    _info("Embedding Dims", f"{stats['embedding_dimensions']}-d (pgvector)")
+    _info("Backend", "PostgreSQL 14 + PL/Python + pgvector + pg_trgm")
+    print()
+
+    _hr("═")
+    print(f"  {C.GREEN}{C.BOLD}✓ Full demo complete!{C.RESET}")
+    print(f"  {C.DIM}Production pipeline: see grantha_ocr.ipynb (Colab + real PostgreSQL){C.RESET}\n")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -370,6 +482,9 @@ def main():
     # reset
     subparsers.add_parser("reset", help="Reset the database")
 
+    # demo
+    subparsers.add_parser("demo", help="Run full end-to-end demo (ingest samples → search → fuzzy → similar → translate → stats)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -388,6 +503,7 @@ def main():
         "translate": cmd_translate,
         "stats": cmd_stats,
         "reset": cmd_reset,
+        "demo": cmd_demo,
     }
 
     try:

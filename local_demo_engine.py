@@ -143,9 +143,13 @@ class AntigravityPGEngine:
         """
         Mock Gemini 2.0 Flash transliteration.
         In production: model.generate_content(prompt).text
+        The mock combines image hash with OCR hash so translation varies
+        with both the source image and the recognized text.
         """
         img_hash = self._hash_file(image_path)
-        idx = int(img_hash[:8], 16) % len(_GEMINI_TRANSLATIONS)
+        ocr_hash = hashlib.sha256(raw_ocr.encode()).hexdigest()
+        combined = int(img_hash[:8], 16) ^ int(ocr_hash[:8], 16)
+        idx = combined % len(_GEMINI_TRANSLATIONS)
         return _GEMINI_TRANSLATIONS[idx]
 
     # ─── Mock pgvector embedding ──────────────────────────────────────────
@@ -258,7 +262,9 @@ class AntigravityPGEngine:
     def similarity_search(self, query_text: str, top_k: int = 3) -> list:
         """
         pgvector cosine similarity: embedding <=> query_vector
-        Simulated with cosine distance computation over stored JSON embeddings.
+        MOCK: O(N*768) Python loop over JSON blobs.
+        Production uses: SELECT ... ORDER BY embedding <=> $1 LIMIT $2
+        (pgvector HNSW index, O(log N) with native C distance computation)
         """
         query_vec = self._generate_embedding(query_text)
         rows = self._conn.execute(

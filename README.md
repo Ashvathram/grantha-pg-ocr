@@ -12,6 +12,15 @@ Built for **Stack Unknown — The Obscure Tech Hackathon** by GDG on Campus SAST
 
 > "The Database IS the Application."
 
+## ⚡ Fastest Path to a Running Demo
+
+```bash
+git clone https://github.com/Ashvathram/grantha-pg-ocr && cd grantha-pg-ocr
+python client.py demo
+```
+
+> **Requires:** Python ≥ 3.10 — the local demo uses only the standard library, no `pip install` needed.
+
 ## The Obscure Stack
 
 Instead of building a typical web backend (Flask/FastAPI/Node) that connects to a database, this project flips the architecture: the database *is* the backend.
@@ -67,32 +76,30 @@ The Gemini API is integrated directly into the `translate_manuscript` stored pro
 
 If you don't have PostgreSQL or WSL installed locally, a simulated mock backend is provided for easy testing on Windows.
 
-### 1. Install local dependencies
+### Run the CLI tool
 ```bash
-python -m pip install -r requirements.txt
-```
+# Full end-to-end demo (recommended for first run)
+python client.py demo
 
-### 2. Run the CLI tool
-```bash
-# Ingest sample manuscripts
+# Or run individual commands:
 python client.py ingest-dir samples/
-
-# Full-text exact search
 python client.py search dharma
-
-# Fuzzy search (simulating pg_trgm)
 python client.py fuzzy dharma
-
-# Vector similarity search (simulating pgvector)
 python client.py similar "righteousness"
-
-# View all records
+python client.py translate 1
 python client.py list
+python client.py stats
+python client.py reset
 ```
 
 > **Note:** `client.py` uses `local_demo_engine.py` (SQLite) under the hood to simulate the PL/Python PostgreSQL environment. The true production code is in the Colab notebook.
 
 ---
 
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+
 ### About the Developer
 Ashvathram B — Final-year B.Tech CSE student at SASTRA University.
+
